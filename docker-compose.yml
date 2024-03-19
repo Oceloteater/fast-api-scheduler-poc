@@ -1,0 +1,32 @@
+version: "3.9"
+
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app/db:/app/db
+    environment:
+      - DATABASE_URL=sqlite:///app/db/sql_app.db
+    depends_on:
+      - db
+      - redis
+  db:
+    image: jitesoft/sqlite:latest  # Had to use community edition of sqlite docker image
+    volumes:
+      - db_data:/var/lib/sqlite
+    environment:
+      - DOCKER_DEFAULT_PLATFORM=linux/amd64  # Attempting to match arch of community edition sqlite
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+  redis:
+    image: redis:latest
+    hostname: redis_container
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+volumes:
+  db_data:
