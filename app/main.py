@@ -1,12 +1,11 @@
-from fastapi import FastAPI, Body, Path, Depends
-from typing import Union
+from fastapi import FastAPI, Body, Path, Depends, HTTPException
 from datetime import datetime
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 
 from app.tasks import scheduler, schedule_tasks
-from app.models import Announcement, Base
+from app.models import Base, Announcement, AnnouncementStatus
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///./sql_app.db"
 
@@ -51,32 +50,48 @@ async def root():
 
 @app.post("/api/v1/announcements")
 async def schedule_announcement(message: str = Body(...), send_at: datetime = Body(...), db: Session = Depends(get_db)):
-    print(f"Announcement scheduled: {message} - Scheduled for: {send_at}")
+    try:
+        print(f"Announcement scheduled: {message} - Scheduled for: {send_at}")
 
-    announcement = Announcement(message=message, send_at=send_at)
-    db.add(announcement)
-    db.commit()
-    db.refresh(announcement)
+        announcement = Announcement(message=message, send_at=send_at)
+        db.add(announcement)
+        db.commit()
+        db.refresh(announcement)
 
-    return {"message": f"Announcement scheduled successfully. ID: {announcement.id}"}
+        return {"message": f"Announcement scheduled successfully. ID: {announcement.id}"}
+    except Exception as e:
+        db.rollback()  # rollback any changes made in case of error
+        raise HTTPException(status_code=500, detail=f"An error occurred while scheduling the announcement: {str(e)}")
 
 
 @app.get("/api/v1/announcements/{announcement_id}")
 async def get_announcement_by_id(announcement_id: int = Path(..., description="ID of the announcement to retrieve"), db: Session = Depends(get_db)):
+    try:
+        announcement = db.query(Announcement).filter(Announcement.id == announcement_id).first()
+        if not announcement:
+            raise HTTPException(status_code=404, detail=f"Announcement with ID {announcement_id} not found")
 
-    announcement = db.query(Announcement).filter(Announcement.id == announcement_id).first()
-
-    if not announcement:
-        return {"message": f"Announcement with ID {announcement_id} not found"}
-
-    return {
-        "id": announcement.id,
-        "message": announcement.message,
-        "status": announcement.status.value,
-        "send_at": announcement.send_at.isoformat() if announcement.send_at else None
-    }
+        return {
+            "id": announcement.id,
+            "message": announcement.message,
+            "status": announcement.status.value,
+            "send_at": announcement.send_at.isoformat() if announcement.send_at else None
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An error occurred while retrieving the announcement: {str(e)}")
 
 
-@app.get("/items/{item_id}")
-async def read_item(item_id: int, q: Union[str, None] = None):
-    return {"item_id": item_id, "q": q}
+@app.put("/api/v1/announcements/{announcement_id}/update-status")
+async def update_announcement_status(announcement_id: int, new_status: AnnouncementStatus, db: Session = Depends(get_db)):
+    try:
+        announcement = db.query(Announcement).filter(Announcement.id == announcement_id).first()
+        if not announcement:
+            raise HTTPException(status_code=404, detail=f"Announcement with ID: {announcement_id} not found")
+
+        announcement.status = new_status
+        db.commit()
+
+        return {"message": f"Announcement with ID: {announcement_id} updated to SENT successfully"}
+    except Exception as e:
+        db.rollback()  # rollback any changes made in case of error
+        raise HTTPException(status_code=500, detail=f"An error occurred while updating the announcement: {str(e)}")
